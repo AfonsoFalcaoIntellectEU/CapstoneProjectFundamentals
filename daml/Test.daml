@@ -20,7 +20,7 @@ test = script do
       testConsultItemDetails participants
       testBobAcceptingOwnProposalFails participants
       testRemoveListing participants
-      testWrongSeller participants
+      testWrongSellerCantExerciseChoice participants
 
       -- as a regulator I want to audit the purchases on the platform
       items <- map snd <$> query  @ItemPurchase participants.regulator
@@ -159,8 +159,8 @@ testRemoveListing Participants{..} = script do
     
   submit alice do exerciseCmd listingCid RemoveListing
 
-testWrongSeller : Participants -> Script ()
-testWrongSeller Participants{..} = script do
+testWrongSellerCantExerciseChoice : Participants -> Script ()
+testWrongSellerCantExerciseChoice Participants{..} = script do
   let item = ListedMarketplaceItem with
         seller = alice
         id = "item7"
@@ -172,7 +172,7 @@ testWrongSeller Participants{..} = script do
   
   itemProposalCid <- submit bob do 
       createCmd ItemPurchaseProposal with
-          itemId = "" 
+          itemId = "item7" 
           buyer = bob 
           seller = charlie
           amount = 10.0 
