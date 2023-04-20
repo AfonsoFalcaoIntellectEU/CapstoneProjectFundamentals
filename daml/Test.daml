@@ -1,0 +1,184 @@
+module Test where
+
+import MainMarket
+import Daml.Script
+
+data Participants = Participants with
+    alice     : Party -- marketplace user
+    bob       : Party -- marketplace user
+    charlie   : Party -- marketplace user
+    regulator : Party -- acts as the regulator
+    public    : Party -- acts as the public party (for assets everyone can see)
+
+test : Script ()
+test = script do
+  setupParticipants
+    >>= \participants -> do  
+      testAcceptedProposalFlow participants
+      testRejectedProposalFlow participants
+      testWithdrawProposalFlow participants
+      testConsultItemDetails participants
+      testBobAcceptingOwnProposalFails participants
+      testRemoveListing participants
+      testWrongSeller participants
+
+      -- as a regulator I want to audit the purchases on the platform
+      items <- map snd <$> query  @ItemPurchase participants.regulator
+      debug items
+
+  return ()
+
+setupParticipants : Script Participants
+setupParticipants = script do 
+  alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+  bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+  charlie <- allocatePartyWithHint "Charlie" (PartyIdHint "Charlie")
+  regulator <- allocatePartyWithHint "Regulator" (PartyIdHint "Regulator")
+  public <- allocatePartyWithHint "Public" (PartyIdHint "Public")
+  return $ Participants with ..
+
+testAcceptedProposalFlow : Participants -> Script (ContractId ItemPurchase)
+testAcceptedProposalFlow Participants{..} = script do 
+  let item = ListedMarketplaceItem with
+        seller = alice
+        id = "item1"
+        name = "Dark Side of the Moon"
+        description = "Pink Floyd eight studio album"
+        observers = [public, regulator]
+
+  listingCid <- submit alice do createCmd item
+    
+  itemProposalCid <- submit bob do 
+      createCmd ItemPurchaseProposal with
+          itemId = item.id 
+          buyer = bob 
+          seller = alice
+          amount = 20.0 
+          currency = "USD"
+          ..
+
+  submit alice do
+      exerciseCmd itemProposalCid AcceptProposal
+
+testRejectedProposalFlow : Participants -> Script () 
+testRejectedProposalFlow Participants{..} = script do 
+  let item = ListedMarketplaceItem with
+        seller = alice
+        id = "item2"
+        name = "Ummagumma"
+        description = "Pink Floyd fourth album"
+        observers = [public, regulator]
+
+  listingCid <- submit alice do createCmd item 
+    
+  itemProposalCid <- submit bob do 
+      createCmd ItemPurchaseProposal with
+          itemId = item.id 
+          buyer = bob 
+          seller = alice
+          amount = 20.0 
+          currency = "USD"
+          ..
+
+  itemPurchaseCid <- submit alice do
+      exerciseCmd itemProposalCid RejectProposal
+
+  return ()
+
+testWithdrawProposalFlow : Participants -> Script () 
+testWithdrawProposalFlow Participants{..} = script do 
+  let item = ListedMarketplaceItem with
+        seller = alice
+        id = "item3"
+        name = "A Saucerful of Secrets"
+        description = "Pink Floyd second studio album"
+        observers = [public, regulator]
+
+  listingCid <- submit alice do createCmd item
+    
+  itemProposalCid <- submit bob do 
+      createCmd ItemPurchaseProposal with
+          itemId = item.id 
+          buyer = bob 
+          seller = alice
+          amount = 200.0 
+          currency = "USD"
+          ..
+
+  itemPurchaseCid <- submit bob do
+    exerciseCmd itemProposalCid WithdrawProposal
+
+  return ()
+
+testConsultItemDetails : Participants -> Script ListedMarketplaceItem
+testConsultItemDetails Participants{..} = script do
+  let listedItem = ListedMarketplaceItem with
+          seller = charlie
+          id = "item4"
+          name = "Danger Days: The True Lives of the Fabulous Killjoys"
+          description = "My Chemical Romance fourth studio album"
+          observers = [public, regulator]
+
+  submit charlie do createCmd listedItem
+
+  submitMulti [bob] [public] do
+    exerciseByKeyCmd @ListedMarketplaceItem (listedItem.seller, listedItem.id) ConsultItemDetails with customer = bob
+
+testBobAcceptingOwnProposalFails : Participants -> Script ()
+testBobAcceptingOwnProposalFails Participants{..} = script do
+  let item = ListedMarketplaceItem with
+        seller = alice
+        id = "item5"
+        name = "Wish You Were Here"
+        description = "Pink Floyd ninth studio album"
+        observers = [public, regulator]
+
+  listingCid <- submit alice do createCmd item
+  
+  itemProposalCid <- submit bob do 
+      createCmd ItemPurchaseProposal with
+          itemId = item.id 
+          buyer = bob 
+          seller = alice
+          amount = 10.0 
+          currency = "USD"
+          ..
+
+  submitMustFail bob do
+      exerciseCmd itemProposalCid RejectProposal -- bob cannot accept this one as they are not the controller
+
+testRemoveListing : Participants -> Script ()
+testRemoveListing Participants{..} = script do
+  listingCid <- submit alice do 
+    createCmd ListedMarketplaceItem with
+      seller = alice
+      id = "item6"
+      name = "The Piper at the Gates of Dawn"
+      description = "Pink Floyd first studio album"
+      observers = [public, regulator]
+    
+  submit alice do exerciseCmd listingCid RemoveListing
+
+testWrongSeller : Participants -> Script ()
+testWrongSeller Participants{..} = script do
+  let item = ListedMarketplaceItem with
+        seller = alice
+        id = "item7"
+        name = "Animals"
+        description = "Pink Floyd tenth studio album"
+        observers = [public, regulator]
+
+  listingCid <- submit alice do createCmd item
+  
+  itemProposalCid <- submit bob do 
+      createCmd ItemPurchaseProposal with
+          itemId = "" 
+          buyer = bob 
+          seller = charlie
+          amount = 10.0 
+          currency = "USD"
+          ..
+  
+  
+  submitMustFail charlie do exerciseCmd itemProposalCid AcceptProposal
+  submitMustFail alice do exerciseCmd itemProposalCid AcceptProposal

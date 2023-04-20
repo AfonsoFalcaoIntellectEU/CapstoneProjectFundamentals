@@ -1,0 +1,82 @@
+module MainMarket where
+
+import DA.Exception
+
+template ListedMarketplaceItem
+  with
+    seller      : Party
+    id          : Text
+    name        : Text
+    description : Text
+    observers   : [Party]
+  where
+    signatory seller
+    observer  observers
+    ensure id /= "" && name /= ""
+    key (seller, id) : (Party, Text)
+    maintainer key._1
+    
+    choice RemoveListing : () 
+     controller seller
+        do return ()
+    
+    nonconsuming choice ConsultItemDetails : ListedMarketplaceItem
+      with 
+        customer : Party
+      controller customer
+        do return this
+
+
+template ItemPurchase
+  with
+    buyer     : Party
+    seller    : Party
+    regulator : Party
+    amount    : Decimal
+    currency  : Text
+    item      : ListedMarketplaceItem
+  where
+    signatory buyer, seller
+    observer regulator
+    
+    
+template ItemPurchaseProposal
+  with
+    buyer     : Party
+    seller    : Party
+    regulator : Party 
+    amount    : Decimal
+    currency  : Text
+    itemId    : Text
+  where
+    signatory buyer
+    observer seller, regulator
+    ensure amount > 0.0
+    
+    choice AcceptProposal : ContractId ItemPurchase
+      controller seller
+        do 
+          -- fetches item data for posteriority and archives it
+          listedItemOpt <- lookupByKey @ListedMarketplaceItem (seller, itemId)
+          case listedItemOpt of
+            Some itemCid -> do
+              item <- fetch itemCid
+              assertMsg "Proposal seller must match the item seller" $ item.seller == seller
+              exercise itemCid RemoveListing
+              create ItemPurchase with ..
+            _ -> throw InvalidItemId with party = seller, ..
+    
+    choice RejectProposal : ()
+      controller seller
+        do return ()
+    
+    choice WithdrawProposal : ()
+      controller buyer
+        do return ()
+      
+exception InvalidItemId 
+  with
+    itemId : Text
+    party : Party
+  where 
+    message (partyToText party) <> " cannot fetch ListedMarketplaceItem with id: " <> itemId 
