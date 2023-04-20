@@ -63,17 +63,16 @@ navigator-options:
 
 ### IV. Building
 To compile the project
-```
+```bash
 $ daml build
 ```
 
 ### V. Testing
 To test all scripts:
 Either run the pre-written `test` script in `Test.daml`
-```
 
 ### VI. Running
 To load the project into the sandbox and start navigator:
-```
+```bash
 $ daml start
 ```
